@@ -3,11 +3,14 @@
 
 #include <boost/filesystem.hpp>
 
+class boost::filesystem::path;
+
 namespace Slic3r {
 
 	struct DownloadAppData
 	{
-		std::string address;
+		std::string url;
+		boost::filesystem::path target;
 	};
 
 	class AppUpdater
@@ -23,7 +26,7 @@ namespace Slic3r {
 		AppUpdater()
 		{}
 	public:
-		~AppUpdater();
+		~AppUpdater(){}
 		AppUpdater(AppUpdater const&) = delete;
 		void operator=(AppUpdater const&) = delete;
 

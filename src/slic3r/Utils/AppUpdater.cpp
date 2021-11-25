@@ -2,6 +2,7 @@
 
 #include <boost/filesystem.hpp>
 #include <boost/log/trivial.hpp>
+#include <curl/curl.h>
 
 #include "libslic3r/Utils.hpp"
 #include "slic3r/GUI/format.hpp"
@@ -10,8 +11,32 @@
 namespace Slic3r {
 
 namespace {
+	size_t write_data(void* ptr, size_t size, size_t nmemb, FILE* stream) {
+		size_t written = fwrite(ptr, size, nmemb, stream);
+		return written;
+	}
+
+	int get_file(const std::string& url, const boost::filesystem::path& target_path) {
+		CURL* curl;
+		FILE* fp;
+		CURLcode res;
+		curl = curl_easy_init();
+		if (curl) {
+			fp = fopen(target_path.string().c_str(), "wb");
+			curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
+			curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+			res = curl_easy_perform(curl);
+			/* always cleanup */
+			curl_easy_cleanup(curl);
+			fclose(fp);
+		}
+		return 0;
+	}
+
+
 	// downloads file into std::string
-	bool get_file(const std::string& url, const boost::filesystem::path& target_path)
+	bool get_text_file(const std::string& url, const boost::filesystem::path& target_path)
 	{
 		bool res = false;
 		boost::filesystem::path tmp_path = target_path;
@@ -41,13 +66,14 @@ namespace {
 				res = true;
 			})
 			.perform_sync();
-				return res;
+			return res;
 	}
 }
 
 void AppUpdater::download_file(const DownloadAppData& data)
 {
-
+	bool res = get_file(data.url, data.target);
+	BOOST_LOG_TRIVIAL(error) << "Download from " << data.url << " to " << data.target.string() << " was " << res;
 }
 
 } //namespace Slic3r 
