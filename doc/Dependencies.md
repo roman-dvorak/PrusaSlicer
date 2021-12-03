@@ -25,11 +25,11 @@
 * qhull: libqhull-dev does not contain libqhullcpp => link errors. Until it is fixed, we will use the builtin version. https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=925540
 * semver: One module C library, author expects to use clib for installation. No packages.
 * Shiny: no packages
+* igl[^1]
+* nanosvg[^1]
+* agg[^1]
+* catch2[^1]: Only Arch has packages for catch2, other distros at most catch (v1.x). Being strictly header only, we bundle this in the source tree. Used for the unit-test suites.
 
-## Header only
-* igl
-* nanosvg
-* agg
-* catch2: Only Arch has packages for catch2, other distros at most catch (v1.x). Being strictly header only, we bundle this in the source tree. Used for the unit-test suites.
+[^1]: Header only libraries
 
 
