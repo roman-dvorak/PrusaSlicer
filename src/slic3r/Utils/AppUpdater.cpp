@@ -5,46 +5,37 @@
 #include <curl/curl.h>
 
 #include "slic3r/GUI/format.hpp"
+#include "slic3r/GUI/GUI_App.hpp"
+#include "slic3r/GUI/GUI.hpp"
 #include "slic3r/Utils/Http.hpp"
 
 namespace Slic3r {
 
 namespace {
-	// downloads file into std::string
-	bool get_text_file(const std::string& url, const boost::filesystem::path& target_path)
+	/*
+	bool get_file(const std::string& url, size_t size_limit, std::function<bool(std::string )> completefn)
 	{
 		bool res = false;
-		boost::filesystem::path tmp_path = target_path;
-		tmp_path += format(".%1%.download", get_current_pid());
-
-		BOOST_LOG_TRIVIAL(info) << GUI::format("Get: `%1%`\n\t-> `%2%`\n\tvia tmp path `%3%`",
-			url,
-			target_path.string(),
-			tmp_path.string());
-
 		Http::get(url)
-			.size_limit(100 * 1024 * 1024) // current win installer is 71MB
+			.size_limit(size_limit)
 			.on_progress([](Http::Progress, bool& cancel) {
 			if (cancel) { cancel = true; }
 				})
 			.on_error([&](std::string body, std::string error, unsigned http_status) {
-				(void)body;
-				BOOST_LOG_TRIVIAL(error) << GUI::format("Error getting: `%1%`: HTTP %2%, %3%",
-					url,
-					http_status,
-					error);
-			})
-			.on_complete([&](std::string body, unsigned /* http_status */) {
-				boost::filesystem::fstream file(tmp_path, std::ios::out | std::ios::binary | std::ios::trunc);
-				file.write(body.c_str(), body.size());
-				file.close();
-				boost::filesystem::rename(tmp_path, target_path);
-				res = true;
+					(void)body;
+					BOOST_LOG_TRIVIAL(error) << GUI::format("Error getting: `%1%`: HTTP %2%, %3%",
+						url,
+						http_status,
+						error);
+				})
+			.on_complete([&](std::string body, unsigned ) {
+				assert(completefn != nullptr);
+				res = completefn(body);
 			})
 			.perform_sync();
-			return res;
+		return res;
 	}
-
+	*/
 #ifdef _WIN32
 	static bool run_file(const boost::filesystem::path& path)
 	{
@@ -90,36 +81,148 @@ namespace {
 #endif //_WIN32
 }
 
-void AppUpdater::download_file(const DownloadAppData& data)
+struct AppDownloader::priv {
+	priv();
+	// Download file. What happens with the data is specified in completefn.
+	bool get_file(const std::string& url, size_t size_limit, std::function<bool(std::string /*body*/)> completefn, std::function<void(Http::Progress)> progress_fn);
+	// Reads version file online, prompts user with update dialog
+	//bool check_version();
+	// Download installer / app
+	bool download_file(const DownloadAppData& data);
+	// Run file in m_last_dest_path
+	bool run_downloaded_file();
+
+	void set_dest_path(const boost::filesystem::path& p) { m_user_dest_path = p; }
+
+	std::thread				m_thread;
+	bool					m_cancel;
+	boost::filesystem::path m_default_dest_folder;
+	boost::filesystem::path m_user_dest_path;
+	boost::filesystem::path m_last_dest_path;
+};
+
+AppDownloader::priv::priv() :
+	m_cancel (false),
+	m_default_dest_folder (boost::filesystem::path(data_dir()) / "cache")
+{	
+}
+
+bool  AppDownloader::priv::get_file(const std::string& url, size_t size_limit, std::function<bool(std::string /*body*/)> complete_fn, std::function<void(Http::Progress)> progress_fn)
 {
-	if(!user_dest_path.empty())
-		last_dest_path = user_dest_path;
+	bool res = false;
+	Http::get(url)
+		.size_limit(size_limit)
+		.on_progress([this, progress_fn](Http::Progress progress, bool& cancel) {
+			cancel = this->m_cancel;
+			progress_fn(std::move(progress));
+		})
+		.on_error([&](std::string body, std::string error, unsigned http_status) {
+			(void)body;
+			BOOST_LOG_TRIVIAL(error) << GUI::format("Error getting: `%1%`: HTTP %2%, %3%",
+				url,
+				http_status,
+				error);
+		})
+		.on_complete([&](std::string body, unsigned /* http_status */) {
+			assert(complete_fn != nullptr);
+			res = complete_fn(body);
+		})
+		.perform_sync();
+			return res;
+}
+/*(
+bool AppDownloader::priv::check_version()
+{
+	// Download version file
+	std::string version_check_url = "https://files.prusa3d.com/wp-content/uploads/repository/PrusaSlicer-settings-master/live/PrusaSlicer.version2";
+	bool res = get_file(version_check_url, 256,
+		[](std::string body){
+			BOOST_LOG_TRIVIAL(error) << "version string:\n" << body;
+			return true;	
+		});
+	return res;
+}
+*/
+bool AppDownloader::priv::download_file(const DownloadAppData& data)
+{
+	boost::filesystem::path dest_path;
+	if(!m_user_dest_path.empty())
+		dest_path = m_user_dest_path;
 	else {
 		size_t slash = data.url.rfind('/');
 		std::string filename = slash != std::string::npos ? data.url.substr(slash) : data.url;
-		last_dest_path = default_dest_folder / filename;
+		dest_path = m_default_dest_folder / filename;
 	}
-	assert(!last_dest_path.empty());
-	if (last_dest_path.empty())
+	assert(!dest_path.empty());
+	if (dest_path.empty())
 	{
 		BOOST_LOG_TRIVIAL(error) << "Download from " << data.url << " could not start. Destination path is empty.";
-		return;
+		return false;
 	}
-	bool res = get_text_file(data.url, last_dest_path);
-	BOOST_LOG_TRIVIAL(info) << "Download from " << data.url << " to " << last_dest_path.string() << " was " << res;
+	//bool res = get_file(data.url, 70 * 1024 * 1024, std::bind(&AppDownloader::priv::write_file, this));
+	bool res = get_file(data.url, 70 * 1024 * 1024, 
+		[dest_path](std::string body){
+			boost::filesystem::path tmp_path = dest_path;
+			tmp_path += format(".%1%%2%", get_current_pid(), ".download");
+			try
+			{
+				boost::filesystem::fstream file(tmp_path, std::ios::out | std::ios::binary | std::ios::trunc);
+				file.write(body.c_str(), body.size());
+				file.close();
+				boost::filesystem::rename(tmp_path, dest_path);
+			}
+			catch (const std::exception&)
+			{
+				BOOST_LOG_TRIVIAL(error) << "Failed to write and move " << tmp_path << " to " << dest_path;
+				return false;
+			}
+			return true;
+		}
+		,[](Http::Progress progress){
+			double gui_progress = progress.ultotal > 0 ? progress.ulnow / progress.ultotal : 0;
+			printf( "Download progress: %f\n", gui_progress);
+		});
+	// [this](Http::Progress progress, bool &cancel) { this->progress_fn(std::move(progress), cancel); }
+	BOOST_LOG_TRIVIAL(error) << "Download from " << data.url << " to " << dest_path.string() << " was " << res;
+	m_last_dest_path = std::move(dest_path);
+	return res;
 }
 
-void AppUpdater::run_downloaded_file()
+bool AppDownloader::priv::run_downloaded_file()
 {
-	assert(!last_dest_path.empty());
-	if (last_dest_path.empty())
+	assert(!m_last_dest_path.empty());
+	if (m_last_dest_path.empty())
 	{
 		BOOST_LOG_TRIVIAL(error) << "could not run downloaded file. Destination path is empty.";
-		return;
+		return false;
 	}
-	bool res = run_file(last_dest_path);
-	BOOST_LOG_TRIVIAL(info) << "Running "<< last_dest_path.string() << " was " << res;
+	bool res = run_file(m_last_dest_path);
+	BOOST_LOG_TRIVIAL(error) << "Running "<< m_last_dest_path.string() << " was " << res;
+	return res;
+}
 
+
+AppDownloader::AppDownloader()
+	:p(new priv())
+{
+}
+AppDownloader::~AppDownloader()
+{
+	if (p && p->m_thread.joinable()) {
+		// This will stop transfers being done by the thread, if any.
+		// Cancelling takes some time, but should complete soon enough.
+		p->m_cancel = true;
+		p->m_thread.join();
+	}
+}
+void AppDownloader::run(const DownloadAppData& input_data)
+{
+	p->m_thread = std::thread(
+		[this, input_data]() {
+			if (!p->download_file(input_data/*{ "https://www.prusa3d.com/downloads/drivers/PrusaSlicer_Win_standalone_2.3.3.exe" }*/))
+				return;
+			p->run_downloaded_file();
+		});
 }
 
 } //namespace Slic3r 

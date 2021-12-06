@@ -13,32 +13,20 @@ namespace Slic3r {
 		std::string url;
 	};
 
-	class AppUpdater
+	class AppDownloader
 	{
 	public:
-		static AppUpdater& get_instance()
-		{
-			static AppUpdater    instance; // Guaranteed to be destroyed.
-											 // Instantiated on first use.
-			return instance;
-		}
+		AppDownloader();
+		~AppDownloader();
+		AppDownloader(AppDownloader&&) = delete;
+		AppDownloader(const AppDownloader&) = delete;
+		AppDownloader& operator=(AppDownloader&&) = delete;
+		AppDownloader& operator=(const AppDownloader&) = delete;
+
+		void run(const DownloadAppData& input_data);
 	private:
-		AppUpdater()
-		{
-			default_dest_folder = boost::filesystem::path(data_dir()) / "cache";
-		}
-	public:
-		~AppUpdater(){}
-		AppUpdater(AppUpdater const&) = delete;
-		void operator=(AppUpdater const&) = delete;
-
-		void download_file(const DownloadAppData& data);
-		void run_downloaded_file();
-		void set_dest_path(const boost::filesystem::path& p) { user_dest_path  = p; }
-
-		boost::filesystem::path default_dest_folder;
-		boost::filesystem::path user_dest_path;
-		boost::filesystem::path last_dest_path;
+		struct priv;
+		std::unique_ptr<priv> p;
 	};
 } //namespace Slic3r 
 #endif
