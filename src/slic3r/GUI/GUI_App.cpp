@@ -1169,7 +1169,8 @@ bool GUI_App::on_init_inner()
                     );
                 }
             }
-            Slic3r::AppUpdater::get_instance().download_file({"https://www.prusa3d.com/downloads/drivers/PrusaSlicer_Win_standalone_2.3.3.exe", boost::filesystem::path(data_dir())/* / "cache" / "download.exe"*/});
+            Slic3r::AppUpdater::get_instance().download_file({"https://www.prusa3d.com/downloads/drivers/PrusaSlicer_Win_standalone_2.3.3.exe"});
+            Slic3r::AppUpdater::get_instance().run_downloaded_file();
             });
         Bind(EVT_SLIC3R_EXPERIMENTAL_VERSION_ONLINE, [this](const wxCommandEvent& evt) {
             app_config->save();
