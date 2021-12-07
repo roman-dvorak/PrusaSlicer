@@ -1,5 +1,7 @@
 sudo apt-get install  -y git build-essential autoconf cmake libglu1-mesa-dev libgtk-3-dev libdbus-1-dev
 
+cd ..
+
 cd deps
 mkdir build
 cd build
